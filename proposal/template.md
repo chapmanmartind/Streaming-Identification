@@ -4,11 +4,9 @@ SYNema Detective
 
 ## Project Participants
 
-Format the following information in a markdown table:
-
-* Arlie Jackson
-* agjackson
-* Project do-er
+* Arlie Jackson, Martin Chapman
+* agjackson, chapmanmartind
+* Project do-ers (we will work together on code and report writing)
 
 ## Project Description
 
