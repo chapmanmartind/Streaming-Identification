@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Notebook: Identifying Video Services &#8212; SYNema Detectives 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+    <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Network Traffic Analysis for Video Streaming Services" href="../explanation.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="Notebook:-Identifying-Video-Services">
+<h1>Notebook: Identifying Video Services<a class="headerlink" href="#Notebook:-Identifying-Video-Services" title="Link to this heading">¶</a></h1>
+<p>We will start by importing all the packages we need. We will add more to this section as we go.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[1]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>import os
+import pandas as pd
+# Import necessary libraries
+from tqdm import tqdm
+import pandas as pd
+import numpy as np
+from scapy.all import rdpcap, TCP, IP
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from scapy.all import rdpcap, TCP, IP
+import numpy as np
+import warnings
+
+warnings.filterwarnings(&quot;ignore&quot;)
+
+
+pcap_dir = &#39;output_dir/&#39;
+
+
+#NUM_FILES should be, at maximum, 20884 because that is the number of data file in output_dir.
+#However, this is such a large dataset that it crashes my kernel. Therefore we will set it to a smaller number
+#And only use a subset of the data.
+#I have only tested up to 1000 because it any larger seems to risk crashing my kernel.
+NUM_FILES = 1000
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+WARNING: Wireshark is installed, but cannot read manuf !
+</pre></div></div>
+</div>
+<p>Creating a df with the labels and the location of the features</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[2]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>pcap_files = [f for f in os.listdir(pcap_dir) if f.endswith(&#39;.pcap&#39;)]
+
+sample_ids = []
+labels = []
+
+for file in pcap_files:
+    parts = file.split(&#39;_&#39;)
+    sample_id = parts[0]
+    label = parts[1].replace(&#39;.pcap&#39;, &#39;&#39;)
+    sample_ids.append(sample_id)
+    labels.append(label)
+
+data = pd.DataFrame({
+    &#39;sampleID&#39;: sample_ids,
+    &#39;label&#39;: labels,
+    &#39;filepath&#39;: [os.path.join(pcap_dir, f) for f in pcap_files]
+})
+
+#Displaying to get a feeling for the output
+print(data.head())
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+               sampleID    label                                      filepath
+0  11128135789608740605  youtube  output_dir/11128135789608740605_youtube.pcap
+1   1326062620521889375  youtube   output_dir/1326062620521889375_youtube.pcap
+2   9606350208298304688   amazon    output_dir/9606350208298304688_amazon.pcap
+3    394452418702735955  netflix    output_dir/394452418702735955_netflix.pcap
+4  16122494638576240387  netflix  output_dir/16122494638576240387_netflix.pcap
+</pre></div></div>
+</div>
+<p>Extracting features</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>def extract_features(pcap_file):
+
+    try:
+        packets = rdpcap(pcap_file)
+    except Exception as e:
+        print(f&quot;Error reading {pcap_file}: {e}&quot;)
+        return None
+
+    syn_packets = []
+    for pkt in packets:
+        if IP in pkt and TCP in pkt:
+            tcp_layer = pkt[TCP]
+            if tcp_layer.flags &amp; 0x02:
+                syn_packets.append(pkt)
+                if len(syn_packets) == 10:
+                    break
+
+    if len(syn_packets) != 10:
+        print(f&quot;Warning: {pcap_file} contains {len(syn_packets)} SYN packets instead of 10.&quot;)
+
+    features = {}
+
+    for i, pkt in enumerate(syn_packets, 1):
+        features[f&#39;syn_{i}_pkt_len&#39;] = len(pkt)
+        features[f&#39;syn_{i}_src_port&#39;] = pkt[TCP].sport
+        features[f&#39;syn_{i}_dst_port&#39;] = pkt[TCP].dport
+        features[f&#39;syn_{i}_time&#39;] = pkt.time
+
+    #inter-arrival times packets
+    times = [pkt.time for pkt in syn_packets]
+    inter_arrival_times = np.diff(times)
+    for i, inter_time in enumerate(inter_arrival_times, 1):
+        features[f&#39;syn_{i}_inter_arrival&#39;] = inter_time
+
+    return features
+<br/></pre></div>
+</div>
+</div>
+<p>Here we are creating the the ultimate dataframe of features and labels which we will use to train our model</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>def process_pcap_files(data, num_files=1000):
+
+    data_subset = data.head(num_files).reset_index(drop=True)
+
+    feature_list = []
+
+    for index, row in tqdm(data_subset.iterrows(), total=data_subset.shape[0], desc=&quot;Extracting features&quot;):
+        pcap_file = row[&#39;filepath&#39;]
+        features = extract_features(pcap_file)
+        if features is not None:
+            feature_list.append(features)
+        else:
+            default_features = {}
+            for i in range(1, 11):
+                default_features[f&#39;syn_{i}_pkt_len&#39;] = 0
+                default_features[f&#39;syn_{i}_src_port&#39;] = 0
+                default_features[f&#39;syn_{i}_dst_port&#39;] = 0
+                default_features[f&#39;syn_{i}_time&#39;] = 0.0
+            for i in range(1, 10):
+                default_features[f&#39;syn_{i}_inter_arrival&#39;] = 0.0
+            feature_list.append(default_features)
+
+    features_df = pd.DataFrame(feature_list)
+    data_features = pd.concat([data_subset.reset_index(drop=True), features_df.reset_index(drop=True)], axis=1)
+
+    return data_features
+
+data_features = process_pcap_files(data, num_files=NUM_FILES)
+print(data_features.head())
+<br/><br/></pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+Extracting features: 100%|██████████| 1000/1000 [01:26&lt;00:00, 11.59it/s]
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+               sampleID    label  \
+0  11128135789608740605  youtube
+1   1326062620521889375  youtube
+2   9606350208298304688   amazon
+3    394452418702735955  netflix
+4  16122494638576240387  netflix
+
+                                       filepath  syn_1_pkt_len  \
+0  output_dir/11128135789608740605_youtube.pcap             78
+1   output_dir/1326062620521889375_youtube.pcap             74
+2    output_dir/9606350208298304688_amazon.pcap             74
+3    output_dir/394452418702735955_netflix.pcap             74
+4  output_dir/16122494638576240387_netflix.pcap             66
+
+   syn_1_src_port  syn_1_dst_port         syn_1_time  syn_2_pkt_len  \
+0           55450             443  1516845938.986545             78
+1           44216             443  1518267130.401981             74
+2           45730             443  1524779210.880480             74
+3           38058             443  1514613372.017846             74
+4           58495             443  1549055097.181155             66
+
+   syn_2_src_port  syn_2_dst_port  ...        syn_10_time  \
+0           55451             443  ...  1516845942.662726
+1           33768             443  ...  1518267131.863319
+2           45732             443  ...  1524779212.209382
+3             443           38058  ...  1514613372.200013
+4             443           58495  ...  1549055097.885408
+
+   syn_1_inter_arrival  syn_2_inter_arrival  syn_3_inter_arrival  \
+0             0.000528             0.004480             0.015588
+1             0.004142             0.011264             0.007913
+2             0.000336             0.013468             0.000131
+3             0.002520             0.176058             0.000026
+4             0.003553             0.008105             0.003490
+
+  syn_4_inter_arrival  syn_5_inter_arrival  syn_6_inter_arrival  \
+0            0.095991             0.006952             1.871854
+1            1.436479             0.000581             0.000731
+2            1.314571             0.000101             0.000060
+3            0.000018             0.002360             0.000021
+4            0.531875             0.019205             0.129595
+
+   syn_7_inter_arrival syn_8_inter_arrival  syn_9_inter_arrival
+0             0.010075            1.665718             0.004995
+1             0.000076            0.000082             0.000070
+2             0.000060            0.000067             0.000108
+3             0.000005            0.001141             0.000018
+4             0.000198            0.004217             0.004015
+
+[5 rows x 52 columns]
+</pre></div></div>
+</div>
+<p>Creating a mapping of labels to numbers for easier use</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[5]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>from sklearn.preprocessing import LabelEncoder
+
+label_encoder = LabelEncoder()
+
+data_features[&#39;label_encoded&#39;] = label_encoder.fit_transform(data_features[&#39;label&#39;])
+
+label_mapping = dict(zip(label_encoder.classes_, label_encoder.transform(label_encoder.classes_)))
+print(&quot;Label Encoding Mapping:&quot;)
+for label, encoded in label_mapping.items():
+    print(f&quot;{label}: {encoded}&quot;)
+
+# Checking mapping
+print(data_features[[&#39;label&#39;, &#39;label_encoded&#39;]].head())
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Label Encoding Mapping:
+amazon: 0
+netflix: 1
+twitch: 2
+youtube: 3
+     label  label_encoded
+0  youtube              3
+1  youtube              3
+2   amazon              0
+3  netflix              1
+4  netflix              1
+</pre></div></div>
+</div>
+<p>We have to scale our features before training</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>import pandas as pd
+from sklearn.preprocessing import StandardScaler
+import joblib
+
+exclude_columns = [&#39;sampleID&#39;, &#39;label&#39;, &#39;label_encoded&#39;, &#39;filepath&#39;]
+
+feature_columns = [col for col in data_features.columns if col not in exclude_columns]
+
+print(&quot;Feature Columns to be Scaled:&quot;)
+print(feature_columns)
+
+non_numeric_cols = data_features[feature_columns].select_dtypes(exclude=[&#39;number&#39;]).columns.tolist()
+if non_numeric_cols:
+    print(&quot;\nRemoving the following columns&quot;)
+    print(non_numeric_cols)
+    # Remove non-numeric columns from feature_columns
+    feature_columns = [col for col in feature_columns if col not in non_numeric_cols]
+    print(&quot;\nColumns scaled:&quot;)
+    print(feature_columns)
+
+scaler = StandardScaler()
+
+data_features[feature_columns] = scaler.fit_transform(data_features[feature_columns])
+
+print(&quot;\nScaled Feature Data:&quot;)
+print(data_features[feature_columns].head())
+
+joblib.dump(scaler, &#39;scaler.pkl&#39;)
+print(&quot;\nScaler has been saved to &#39;scaler.pkl&#39;.&quot;)
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Feature Columns to be Scaled:
+[&#39;syn_1_pkt_len&#39;, &#39;syn_1_src_port&#39;, &#39;syn_1_dst_port&#39;, &#39;syn_1_time&#39;, &#39;syn_2_pkt_len&#39;, &#39;syn_2_src_port&#39;, &#39;syn_2_dst_port&#39;, &#39;syn_2_time&#39;, &#39;syn_3_pkt_len&#39;, &#39;syn_3_src_port&#39;, &#39;syn_3_dst_port&#39;, &#39;syn_3_time&#39;, &#39;syn_4_pkt_len&#39;, &#39;syn_4_src_port&#39;, &#39;syn_4_dst_port&#39;, &#39;syn_4_time&#39;, &#39;syn_5_pkt_len&#39;, &#39;syn_5_src_port&#39;, &#39;syn_5_dst_port&#39;, &#39;syn_5_time&#39;, &#39;syn_6_pkt_len&#39;, &#39;syn_6_src_port&#39;, &#39;syn_6_dst_port&#39;, &#39;syn_6_time&#39;, &#39;syn_7_pkt_len&#39;, &#39;syn_7_src_port&#39;, &#39;syn_7_dst_port&#39;, &#39;syn_7_time&#39;, &#39;syn_8_pkt_len&#39;, &#39;syn_8_src_port&#39;, &#39;syn_8_dst_port&#39;, &#39;syn_8_time&#39;, &#39;syn_9_pkt_len&#39;, &#39;syn_9_src_port&#39;, &#39;syn_9_dst_port&#39;, &#39;syn_9_time&#39;, &#39;syn_10_pkt_len&#39;, &#39;syn_10_src_port&#39;, &#39;syn_10_dst_port&#39;, &#39;syn_10_time&#39;, &#39;syn_1_inter_arrival&#39;, &#39;syn_2_inter_arrival&#39;, &#39;syn_3_inter_arrival&#39;, &#39;syn_4_inter_arrival&#39;, &#39;syn_5_inter_arrival&#39;, &#39;syn_6_inter_arrival&#39;, &#39;syn_7_inter_arrival&#39;, &#39;syn_8_inter_arrival&#39;, &#39;syn_9_inter_arrival&#39;]
+
+Removing the following columns
+[&#39;syn_1_time&#39;, &#39;syn_2_time&#39;, &#39;syn_3_time&#39;, &#39;syn_4_time&#39;, &#39;syn_5_time&#39;, &#39;syn_6_time&#39;, &#39;syn_7_time&#39;, &#39;syn_8_time&#39;, &#39;syn_9_time&#39;, &#39;syn_10_time&#39;, &#39;syn_1_inter_arrival&#39;, &#39;syn_2_inter_arrival&#39;, &#39;syn_3_inter_arrival&#39;, &#39;syn_4_inter_arrival&#39;, &#39;syn_5_inter_arrival&#39;, &#39;syn_6_inter_arrival&#39;, &#39;syn_7_inter_arrival&#39;, &#39;syn_8_inter_arrival&#39;, &#39;syn_9_inter_arrival&#39;]
+
+Columns scaled:
+[&#39;syn_1_pkt_len&#39;, &#39;syn_1_src_port&#39;, &#39;syn_1_dst_port&#39;, &#39;syn_2_pkt_len&#39;, &#39;syn_2_src_port&#39;, &#39;syn_2_dst_port&#39;, &#39;syn_3_pkt_len&#39;, &#39;syn_3_src_port&#39;, &#39;syn_3_dst_port&#39;, &#39;syn_4_pkt_len&#39;, &#39;syn_4_src_port&#39;, &#39;syn_4_dst_port&#39;, &#39;syn_5_pkt_len&#39;, &#39;syn_5_src_port&#39;, &#39;syn_5_dst_port&#39;, &#39;syn_6_pkt_len&#39;, &#39;syn_6_src_port&#39;, &#39;syn_6_dst_port&#39;, &#39;syn_7_pkt_len&#39;, &#39;syn_7_src_port&#39;, &#39;syn_7_dst_port&#39;, &#39;syn_8_pkt_len&#39;, &#39;syn_8_src_port&#39;, &#39;syn_8_dst_port&#39;, &#39;syn_9_pkt_len&#39;, &#39;syn_9_src_port&#39;, &#39;syn_9_dst_port&#39;, &#39;syn_10_pkt_len&#39;, &#39;syn_10_src_port&#39;, &#39;syn_10_dst_port&#39;]
+
+Scaled Feature Data:
+   syn_1_pkt_len  syn_1_src_port  syn_1_dst_port  syn_2_pkt_len  \
+0       0.993877        0.346241       -0.154649       1.024289
+1       0.077861       -0.896387       -0.154649       0.092270
+2       0.077861       -0.728919       -0.154649       0.092270
+3       0.077861       -1.577543       -0.154649       0.092270
+4      -1.754170        0.683058       -0.154649      -1.771768
+
+   syn_2_src_port  syn_2_dst_port  syn_3_pkt_len  syn_3_src_port  \
+0        0.640709       -0.569927       0.217445       -1.252150
+1       -0.271029       -0.569927       0.217445       -1.252150
+2        0.232039       -0.569927       0.217445       -1.252150
+3       -1.672297        1.116017       0.217445        1.004549
+4       -1.672297        2.032025      -1.786657        0.965883
+
+   syn_3_dst_port  syn_4_pkt_len  ...  syn_7_dst_port  syn_8_pkt_len  \
+0        1.401767       0.336876  ...       -0.567258       0.315394
+1        0.960548       0.336876  ...       -0.567258       0.315394
+2        1.020090       0.336876  ...       -0.567258       0.315394
+3       -0.758651       0.336876  ...        1.893456       0.315394
+4       -0.758651      -1.829527  ...       -0.567258      -1.690291
+
+   syn_8_src_port  syn_8_dst_port  syn_9_pkt_len  syn_9_src_port  \
+0       -1.146324        1.204327       1.099736        0.663998
+1        1.021946       -0.829594       0.143444        0.717244
+2        0.331984       -0.829594       0.143444       -0.041765
+3       -1.146324        1.354403       0.143444        0.301197
+4        1.091004       -0.829594      -1.769141       -1.668100
+
+   syn_9_dst_port  syn_10_pkt_len  syn_10_src_port  syn_10_dst_port
+0       -0.565958        0.203498        -1.287480         1.355897
+1       -0.565958        0.203498         0.905978        -0.741672
+2       -0.565958        0.203498         0.208050        -0.741672
+3       -0.565958        0.203498         0.523412        -0.741672
+4        1.943879       -1.753213        -1.287480         1.472041
+
+[5 rows x 30 columns]
+
+Scaler has been saved to &#39;scaler.pkl&#39;.
+</pre></div></div>
+</div>
+<p>Splitting the data into training and testing sets</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>import pandas as pd
+from sklearn.model_selection import train_test_split
+
+exclude_columns = [&#39;sampleID&#39;, &#39;label&#39;, &#39;label_encoded&#39;, &#39;filepath&#39;]
+
+feature_columns = [col for col in data_features.columns if col not in exclude_columns]
+
+print(&quot;Feature Columns to be Used for Training:&quot;)
+print(feature_columns)
+
+X = data_features[feature_columns]
+y = data_features[&#39;label_encoded&#39;]
+
+TEST_SIZE = 0.2  # 20% for testing
+RANDOM_STATE = 42
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=TEST_SIZE,
+    random_state=RANDOM_STATE,
+    stratify=y
+)
+
+print(f&quot;\nTotal samples: {len(X)}&quot;)
+print(f&quot;Training samples: {len(X_train)}&quot;)
+print(f&quot;Testing samples: {len(X_test)}&quot;)
+
+def display_class_distribution(y, title):
+    distribution = y.value_counts(normalize=True) * 100
+    print(f&quot;\n{title} Class Distribution:&quot;)
+    print(distribution.round(2))
+
+#Relative distributions
+display_class_distribution(y, &quot;Original Dataset&quot;)
+display_class_distribution(y_train, &quot;Training Set&quot;)
+display_class_distribution(y_test, &quot;Testing Set&quot;)
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Feature Columns to be Used for Training:
+[&#39;syn_1_pkt_len&#39;, &#39;syn_1_src_port&#39;, &#39;syn_1_dst_port&#39;, &#39;syn_1_time&#39;, &#39;syn_2_pkt_len&#39;, &#39;syn_2_src_port&#39;, &#39;syn_2_dst_port&#39;, &#39;syn_2_time&#39;, &#39;syn_3_pkt_len&#39;, &#39;syn_3_src_port&#39;, &#39;syn_3_dst_port&#39;, &#39;syn_3_time&#39;, &#39;syn_4_pkt_len&#39;, &#39;syn_4_src_port&#39;, &#39;syn_4_dst_port&#39;, &#39;syn_4_time&#39;, &#39;syn_5_pkt_len&#39;, &#39;syn_5_src_port&#39;, &#39;syn_5_dst_port&#39;, &#39;syn_5_time&#39;, &#39;syn_6_pkt_len&#39;, &#39;syn_6_src_port&#39;, &#39;syn_6_dst_port&#39;, &#39;syn_6_time&#39;, &#39;syn_7_pkt_len&#39;, &#39;syn_7_src_port&#39;, &#39;syn_7_dst_port&#39;, &#39;syn_7_time&#39;, &#39;syn_8_pkt_len&#39;, &#39;syn_8_src_port&#39;, &#39;syn_8_dst_port&#39;, &#39;syn_8_time&#39;, &#39;syn_9_pkt_len&#39;, &#39;syn_9_src_port&#39;, &#39;syn_9_dst_port&#39;, &#39;syn_9_time&#39;, &#39;syn_10_pkt_len&#39;, &#39;syn_10_src_port&#39;, &#39;syn_10_dst_port&#39;, &#39;syn_10_time&#39;, &#39;syn_1_inter_arrival&#39;, &#39;syn_2_inter_arrival&#39;, &#39;syn_3_inter_arrival&#39;, &#39;syn_4_inter_arrival&#39;, &#39;syn_5_inter_arrival&#39;, &#39;syn_6_inter_arrival&#39;, &#39;syn_7_inter_arrival&#39;, &#39;syn_8_inter_arrival&#39;, &#39;syn_9_inter_arrival&#39;]
+
+Total samples: 1000
+Training samples: 800
+Testing samples: 200
+
+Original Dataset Class Distribution:
+label_encoded
+3    46.2
+1    29.6
+2    15.3
+0     8.9
+Name: proportion, dtype: float64
+
+Training Set Class Distribution:
+label_encoded
+3    46.25
+1    29.62
+2    15.25
+0     8.88
+Name: proportion, dtype: float64
+
+Testing Set Class Distribution:
+label_encoded
+3    46.0
+1    29.5
+2    15.5
+0     9.0
+Name: proportion, dtype: float64
+</pre></div></div>
+</div>
+<p>Now we will train our random forest classifier. We are chosing random forest because of its versatility and robustness.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+rf_classifier = RandomForestClassifier(
+    n_estimators=100,
+    random_state=42,
+    class_weight=&#39;balanced&#39;,
+    n_jobs=-1
+)
+
+rf_classifier.fit(X_train, y_train)
+
+y_pred = rf_classifier.predict(X_test)
+
+balanced_acc = balanced_accuracy_score(y_test, y_pred)
+print(f&quot;\nBalanced Accuracy on Test Set: {balanced_acc:.4f}&quot;)
+
+class_report = classification_report(y_test, y_pred, target_names=label_encoder.classes_)
+print(&quot;\nClassification Report:&quot;)
+print(class_report)
+
+conf_matrix = confusion_matrix(y_test, y_pred)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix, annot=True, fmt=&#39;d&#39;, cmap=&#39;Blues&#39;,
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_)
+plt.title(&#39;Confusion Matrix&#39;)
+plt.xlabel(&#39;Predicted Label&#39;)
+plt.ylabel(&#39;True Label&#39;)
+plt.show()
+
+# Feature importances
+importances = rf_classifier.feature_importances_
+feature_names = X_train.columns
+feature_importances = pd.Series(importances, index=feature_names).sort_values(ascending=False)
+
+plt.figure(figsize=(12, 8))
+sns.barplot(x=feature_importances[:20], y=feature_importances.index[:20])
+plt.title(&#39;Top 20 Feature Importances&#39;)
+plt.xlabel(&#39;Importance Score&#39;)
+plt.ylabel(&#39;Feature&#39;)
+plt.show()
+<br/></pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+
+Balanced Accuracy on Test Set: 0.7513
+
+Classification Report:
+              precision    recall  f1-score   support
+
+      amazon       0.87      0.72      0.79        18
+     netflix       0.74      0.63      0.68        59
+      twitch       0.81      0.68      0.74        31
+     youtube       0.83      0.98      0.90        92
+
+    accuracy                           0.81       200
+   macro avg       0.81      0.75      0.77       200
+weighted avg       0.80      0.81      0.80       200
+
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/notebooks_notebook_16_1.png" src="../_images/notebooks_notebook_16_1.png" />
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/notebooks_notebook_16_2.png" src="../_images/notebooks_notebook_16_2.png" />
+</div>
+</div>
+<p>Now we will hypertune our parameters</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><br/><span></span>import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+import numpy as np
+from scipy.stats import randint, uniform
+from tqdm import tqdm
+
+param_dist = {
+    &#39;n_estimators&#39;: randint(100, 300),
+    &#39;max_depth&#39;: [None, 10, 20],
+    &#39;min_samples_split&#39;: randint(2, 11),
+    &#39;min_samples_leaf&#39;: randint(1, 5),
+    &#39;bootstrap&#39;: [True, False],
+    &#39;class_weight&#39;: [&#39;balanced&#39;, None]
+}
+
+rf = RandomForestClassifier(random_state=42, n_jobs=-1)
+
+random_search = RandomizedSearchCV(
+    estimator=rf,
+    param_distributions=param_dist,
+    n_iter=50,
+    cv=5,
+    scoring=&#39;balanced_accuracy&#39;,
+    random_state=42,
+    n_jobs=-1,
+    verbose=2,
+    return_train_score=True
+)
+
+
+random_search.fit(X_train, y_train)
+
+best_params = random_search.best_params_
+best_score = random_search.best_score_
+
+print(&quot;\nBest Parameters Found:&quot;)
+for param, value in best_params.items():
+    print(f&quot;{param}: {value}&quot;)
+
+print(f&quot;\nCross-Validation Balanced Accuracy: {best_score:.4f}&quot;)
+
+
+best_rf = random_search.best_estimator_
+
+y_pred_best = best_rf.predict(X_test)
+
+balanced_acc_best = balanced_accuracy_score(y_test, y_pred_best)
+print(f&quot;\nBalanced Accuracy with the best model: {balanced_acc_best:.4f}&quot;)
+
+class_report_best = classification_report(y_test, y_pred_best, target_names=label_encoder.classes_)
+print(class_report_best)
+
+conf_matrix_best = confusion_matrix(y_test, y_pred_best)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix_best, annot=True, fmt=&#39;d&#39;, cmap=&#39;Greens&#39;,
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_)
+plt.title(&#39;Confusion Matrix for Best Model&#39;)
+plt.xlabel(&#39;Predicted Label&#39;)
+plt.ylabel(&#39;True Label&#39;)
+plt.show()
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Fitting 5 folds for each of 50 candidates, totalling 250 fits
+
+Best Parameters Found:
+bootstrap: True
+class_weight: balanced
+max_depth: 10
+min_samples_leaf: 4
+min_samples_split: 6
+n_estimators: 215
+
+Cross-Validation Balanced Accuracy: 0.7303
+
+Balanced Accuracy with the best model: 0.7669
+              precision    recall  f1-score   support
+
+      amazon       0.70      0.78      0.74        18
+     netflix       0.75      0.56      0.64        59
+      twitch       0.81      0.81      0.81        31
+     youtube       0.81      0.92      0.86        92
+
+    accuracy                           0.79       200
+   macro avg       0.77      0.77      0.76       200
+weighted avg       0.78      0.79      0.78       200
+
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/notebooks_notebook_18_1.png" src="../_images/notebooks_notebook_18_1.png" />
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span>
+</pre></div>
+</div>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">SYNema Detectives</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../explanation.html">Network Traffic Analysis for Video Streaming Services</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Notebook: Identifying Video Services</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../explanation.html" title="previous chapter">Network Traffic Analysis for Video Streaming Services</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2024, Martin Chapman, Arlie Jackson.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/notebooks/notebook.ipynb.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
